@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple TODO App</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 20px auto; background-color: #f4f4f9; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        
+        /* フォーム関連のスタイル */
+        .input-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+        input[type="text"], textarea { padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        button { cursor: pointer; padding: 10px; border: none; border-radius: 4px; color: white; }
+        .btn-primary { background: #007bff; }
+        .btn-primary:hover { background: #0056b3; }
+        .btn-secondary { background: #6c757d; }
+        .btn-success { background: #28a745; }
+        .btn-success:hover { background: #218838; }
+        .btn-danger { background: #dc3545; }
+        .btn-info { background: #17a2b8; }
+        .btn-warning { background: #ffc107; color: black; }
+        
+        /* トグル関連のスタイル */
+        #inputForm { display: none; background: #e9ecef; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .show-form-btn { width: 100%; margin-bottom: 20px; font-size: 1.1em; }
+
+        /* データ操作関連（インポート/エクスポート） */
+        .data-actions { display: flex; gap: 10px; justify-content: flex-end; margin-bottom: 15px; }
+
+        /* タスク一覧関連のスタイル */
+        .filters { margin-bottom: 15px; display: flex; gap: 10px; justify-content: center; }
+        .filter-btn { background: #6c757d; font-size: 0.9em; flex: 1; }
+        .filter-btn.active { background: #343a40; font-weight: bold; }
+        
+        .todo-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .todo-item:last-child { border-bottom: none; }
+        .todo-info { flex-grow: 1; margin-left: 10px; }
+        .completed .title { text-decoration: line-through; color: #999; } 
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>TODO List</h1>
+
+    <div class="data-actions">
+        <button class="btn-info" onclick="exportTodos()">エクスポート</button>
+        <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importTodos(event)">
+        <button class="btn-secondary" onclick="document.getElementById('importFile').click()">インポート</button>
+    </div>
+
+    <button class="btn-success show-form-btn" id="toggleBtn" onclick="toggleForm()">＋ 新しいタスクを追加</button>
+    
+    <div id="inputForm" class="input-group">
+        <input type="text" id="titleInput" placeholder="タスクのタイトル (必須)">
+        <textarea id="descInput" placeholder="詳細説明 (任意)"></textarea>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn-primary" onclick="addTodo()" style="flex: 2;">保存する</button>
+            <button class="btn-secondary" onclick="toggleForm()" style="flex: 1;">キャンセル</button>
+        </div>
+    </div>
+
+    <div class="filters">
+        <button id="filter-all" class="filter-btn active" onclick="renderTodos('all')">すべて</button>
+        <button id="filter-todo" class="filter-btn" onclick="renderTodos('todo')">未完了</button> 
+        <button id="filter-done" class="filter-btn" onclick="renderTodos('done')">完了済み</button>
+    </div>
+
+    <div id="todoList"></div>
+</div>
+
+<script>
+    const API_URL = "http://localhost:8000/todos";
+    let allTodos = []; // 全データを保持
+    let currentFilter = 'all'; // 現在のフィルター状態
+
+    // フォームの表示切り替え
+    function toggleForm() {
+        const form = document.getElementById("inputForm");
+        const btn = document.getElementById("toggleBtn");
+        if (form.style.display === "none" || form.style.display === "") {
+            form.style.display = "flex";
+            btn.style.display = "none";
+        } else {
+            form.style.display = "none";
+            btn.style.display = "block";
+        }
+    }
+
+    // データの取得 (GET)
+    async function fetchTodos() {
+        try {
+            const res = await fetch(API_URL);
+            allTodos = await res.json();
+            renderTodos(currentFilter);
+        } catch (error) {
+            console.error("データの取得に失敗しました", error);
+        }
+    }
+
+    // 画面への出力
+    function renderTodos(filterType) {
+        currentFilter = filterType;
+        
+        // ボタンのアクティブ状態を更新
+        document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`filter-${filterType}`).classList.add('active');
+
+        const list = document.getElementById("todoList");
+        list.innerHTML = "";
+
+        // ステータスをもとに絞り込む
+        const filteredTodos = allTodos.filter(todo => {
+            if (filterType === 'done') return todo.status === 'done';
+            if (filterType === 'todo') return todo.status === 'todo';
+            return true; // 'all'
+        });
+
+        filteredTodos.forEach(todo => {
+            const isDone = todo.status === 'done';
+            const div = document.createElement("div");
+            div.className = `todo-item ${isDone ? 'completed' : ''}`;
+            
+            div.innerHTML = `
+                <input type="checkbox" ${isDone ? 'checked' : ''} 
+                       onchange="toggleTodo(${todo.id}, '${todo.status}')">
+                <div class="todo-info">
+                    <strong class="title">${todo.title}</strong>
+                    <div style="font-size: 0.9em; color: #555;">${todo.description || ''}</div>
+                </div>
+                <button class="btn-warning" style="margin-right: 5px;" 
+                        onclick="editTodo(${todo.id}, '${todo.title}', '${todo.description || ''}')">編集</button>
+                <button class="btn-danger" onclick="deleteTodo(${todo.id})">削除</button>
+            `;
+            list.appendChild(div);
+        });
+    }
+
+    // タスクの追加 (POST)
+    async function addTodo() {
+        const title = document.getElementById("titleInput").value;
+        const description = document.getElementById("descInput").value;
+
+        if (!title.trim()) {
+            alert("タイトルを入力してください");
+            return;
+        }
+
+        await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, description: description || null })
+        });
+        
+        document.getElementById("titleInput").value = "";
+        document.getElementById("descInput").value = "";
+        toggleForm();
+        fetchTodos();
+    }
+
+    // 状態の切り替え (PUT)
+    async function toggleTodo(id, currentStatus) {
+        // 'todo' なら 'done' へ切り替え
+        const newStatus = currentStatus === 'todo' ? 'done' : 'todo';
+        await fetch(`${API_URL}/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus })
+        });
+        fetchTodos();
+    }
+
+    // タスクの編集 (PUT)
+    async function editTodo(id, oldTitle, oldDesc) {
+        const newTitle = prompt("新しいタイトル:", oldTitle);
+        if (newTitle === null || newTitle.trim() === "") return;
+        const newDesc = prompt("新しい詳細:", oldDesc);
+
+        await fetch(`${API_URL}/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: newTitle, description: newDesc || null })
+        });
+        fetchTodos();
+    }
+
+    // タスクの削除 (DELETE)
+    async function deleteTodo(id) {
+        if (confirm("本当にこのタスクを削除しますか？")) {
+            await fetch(`${API_URL}/${id}`, { method: "DELETE" });
+            fetchTodos();
+        }
+    }
+
+    // エクスポート処理
+    function exportTodos() {
+        // バックエンドのAPIを呼び出してダウンロード
+        window.location.href = `${API_URL}/export`;
+    }
+
+    // インポート処理
+    async function importTodos(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const importedData = JSON.parse(e.target.result);
+                const res = await fetch(`${API_URL}/import`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(importedData)
+                });
+                
+                if (res.ok) {
+                    alert("インポートが完了しました！");
+                    fetchTodos();
+                } else {
+                    alert("インポートに失敗しました。データ形式を確認してください。");
+                }
+            } catch (error) {
+                alert("ファイルの読み込みエラーです。正しいJSONファイルか確認してください。");
+            }
+            event.target.value = "";
+        };
+        reader.readAsText(file);
+    }
+
+    // 初期表示時に一覧を取得
+    fetchTodos();
+</script>
+</body>
+</html>
